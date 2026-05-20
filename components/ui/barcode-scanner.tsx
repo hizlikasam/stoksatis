@@ -95,14 +95,13 @@ export function BarcodeScannerDialog({
                 await qrcode.start(
                     { facingMode: "environment" },
                     {
-                        fps: 10,
+                        fps: 20,
                         qrbox: (viewfinderWidth, viewfinderHeight) => {
-                            // Use 80% of viewfinder for scanning area – good balance
-                            const size = Math.min(viewfinderWidth, viewfinderHeight);
-                            const edge = Math.floor(size * 0.8);
-                            return { width: Math.max(edge, 200), height: Math.max(Math.floor(edge * 0.45), 100) };
+                            // Ekranın daha geniş bir alanını tarama için kullan
+                            const width = Math.floor(viewfinderWidth * 0.9);
+                            const height = Math.floor(viewfinderHeight * 0.6);
+                            return { width, height };
                         },
-                        aspectRatio: 1.0,
                         disableFlip: false,
                     },
                     (decodedText) => {
