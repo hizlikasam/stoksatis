@@ -1,15 +1,17 @@
 "use client";
 import { toast } from "sonner";
-import { useState } from "react";
+import { useState, useRef, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { ArrowLeft, Save, Camera } from "lucide-react";
+import { ArrowLeft, Save, Camera, ImagePlus, X, Loader2 } from "lucide-react";
+import Image from "next/image";
 import { BarcodeScannerDialog } from "@/components/ui/barcode-scanner";
 
 import { productSchema } from "@/lib/validations/product";
 import { ProductFormValues, Category, Supplier } from "@/types/database";
 import { createProduct, updateProduct } from "@/lib/services/products";
+import { uploadProductImage } from "@/lib/services/upload";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -36,6 +38,12 @@ export function ProductForm({ initialData, categories, suppliers, onSuccess, hid
     const [error, setError] = useState<string | null>(null);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [isScannerOpen, setIsScannerOpen] = useState(false);
+
+    // Image upload state
+    const [imagePreview, setImagePreview] = useState<string | null>(initialData?.image_url || null);
+    const [imageFile, setImageFile] = useState<File | null>(null);
+    const [isUploadingImage, setIsUploadingImage] = useState(false);
+    const fileInputRef = useRef<HTMLInputElement>(null);
 
     const isEditing = !!initialData;
 
@@ -65,17 +73,89 @@ export function ProductForm({ initialData, categories, suppliers, onSuccess, hid
 
     const categoryId = watch("category_id");
     const supplierId = watch("supplier_id");
+    const costPrice = watch("cost_price");
+    const salePrice = watch("sale_price");
+
+    // Profit margin calculation
+    const profitInfo = useMemo(() => {
+        const cost = Number(costPrice) || 0;
+        const sale = Number(salePrice) || 0;
+        if (cost <= 0 || sale <= 0) return null;
+
+        const profit = sale - cost;
+        const marginPercent = ((profit / cost) * 100).toFixed(1);
+
+        return {
+            profit,
+            marginPercent,
+            isPositive: profit > 0,
+        };
+    }, [costPrice, salePrice]);
+
+    // Handle image file selection (camera or gallery)
+    function handleImageSelect(event: React.ChangeEvent<HTMLInputElement>) {
+        const file = event.target.files?.[0];
+        if (!file) return;
+
+        // Validate file type
+        if (!file.type.startsWith("image/")) {
+            toast.error("Lütfen geçerli bir resim dosyası seçin.");
+            return;
+        }
+
+        // Validate file size (max 5MB)
+        if (file.size > 5 * 1024 * 1024) {
+            toast.error("Resim boyutu en fazla 5MB olabilir.");
+            return;
+        }
+
+        setImageFile(file);
+
+        // Create preview
+        const reader = new FileReader();
+        reader.onloadend = () => {
+            setImagePreview(reader.result as string);
+        };
+        reader.readAsDataURL(file);
+    }
+
+    function removeImage() {
+        setImageFile(null);
+        setImagePreview(null);
+        setValue("image_url", "");
+        if (fileInputRef.current) {
+            fileInputRef.current.value = "";
+        }
+    }
 
     async function onSubmit(data: ProductFormValues) {
         setIsSubmitting(true);
         setError(null);
 
         try {
+            let imageUrl = data.image_url || "";
+
+            // If a new image file is selected, upload it first
+            if (imageFile) {
+                setIsUploadingImage(true);
+                try {
+                    imageUrl = await uploadProductImage(imageFile);
+                } catch (uploadErr: any) {
+                    setError(uploadErr.message || "Resim yüklenirken bir hata oluştu.");
+                    setIsSubmitting(false);
+                    setIsUploadingImage(false);
+                    return;
+                }
+                setIsUploadingImage(false);
+            }
+
+            const submitData = { ...data, image_url: imageUrl };
+
             let savedProduct;
             if (isEditing) {
-                savedProduct = await updateProduct(initialData.id, data);
+                savedProduct = await updateProduct(initialData.id, submitData);
             } else {
-                savedProduct = await createProduct(data);
+                savedProduct = await createProduct(submitData);
             }
 
             if (onSuccess) {
@@ -107,12 +187,128 @@ export function ProductForm({ initialData, categories, suppliers, onSuccess, hid
                         </div>
                     )}
 
+                    {/* ── Image Upload Section ── */}
+                    <div className="space-y-2">
+                        <Label>Ürün Fotoğrafı</Label>
+                        <div className="flex items-start gap-4">
+                            {/* Preview / Placeholder */}
+                            <div
+                                className="relative group flex-shrink-0 w-28 h-28 sm:w-32 sm:h-32 rounded-xl border-2 border-dashed border-muted-foreground/25 bg-muted/30 flex items-center justify-center overflow-hidden cursor-pointer hover:border-primary/50 hover:bg-muted/50 transition-all"
+                                onClick={() => fileInputRef.current?.click()}
+                            >
+                                {imagePreview ? (
+                                    <>
+                                        <img
+                                            src={imagePreview}
+                                            alt="Ürün önizleme"
+                                            className="w-full h-full object-cover rounded-xl"
+                                        />
+                                        {/* Remove button overlay */}
+                                        <button
+                                            type="button"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                removeImage();
+                                            }}
+                                            className="absolute top-1 right-1 bg-destructive text-destructive-foreground rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity shadow-md"
+                                        >
+                                            <X className="h-3.5 w-3.5" />
+                                        </button>
+                                    </>
+                                ) : (
+                                    <div className="flex flex-col items-center gap-1.5 text-muted-foreground">
+                                        <ImagePlus className="h-8 w-8" />
+                                        <span className="text-xs font-medium">Fotoğraf Ekle</span>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Upload Buttons */}
+                            <div className="flex flex-col gap-2 pt-1">
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    className="justify-start gap-2"
+                                    onClick={() => fileInputRef.current?.click()}
+                                >
+                                    <ImagePlus className="h-4 w-4" />
+                                    Galeriden Seç
+                                </Button>
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    className="justify-start gap-2"
+                                    onClick={() => {
+                                        // Create a temporary input with capture attribute for camera
+                                        const cameraInput = document.createElement("input");
+                                        cameraInput.type = "file";
+                                        cameraInput.accept = "image/*";
+                                        cameraInput.capture = "environment";
+                                        cameraInput.onchange = (e) => {
+                                            const target = e.target as HTMLInputElement;
+                                            const file = target.files?.[0];
+                                            if (file) {
+                                                // Reuse same handler logic
+                                                if (!file.type.startsWith("image/")) {
+                                                    toast.error("Lütfen geçerli bir resim dosyası seçin.");
+                                                    return;
+                                                }
+                                                if (file.size > 5 * 1024 * 1024) {
+                                                    toast.error("Resim boyutu en fazla 5MB olabilir.");
+                                                    return;
+                                                }
+                                                setImageFile(file);
+                                                const reader = new FileReader();
+                                                reader.onloadend = () => {
+                                                    setImagePreview(reader.result as string);
+                                                };
+                                                reader.readAsDataURL(file);
+                                            }
+                                        };
+                                        cameraInput.click();
+                                    }}
+                                >
+                                    <Camera className="h-4 w-4" />
+                                    Kamera ile Çek
+                                </Button>
+                                {imagePreview && (
+                                    <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="sm"
+                                        className="justify-start gap-2 text-destructive hover:text-destructive"
+                                        onClick={removeImage}
+                                    >
+                                        <X className="h-4 w-4" />
+                                        Kaldır
+                                    </Button>
+                                )}
+                                <p className="text-xs text-muted-foreground mt-1">
+                                    JPG, PNG veya WebP • Maks. 5MB
+                                </p>
+                            </div>
+
+                            {/* Hidden file input for gallery */}
+                            <input
+                                ref={fileInputRef}
+                                type="file"
+                                accept="image/*"
+                                className="hidden"
+                                onChange={handleImageSelect}
+                            />
+                        </div>
+                    </div>
+
+                    {/* ── Product Name ── */}
                     <div className="space-y-2">
                         <Label htmlFor="name">Ürün Adı <span className="text-destructive">*</span></Label>
                         <Input id="name" placeholder="Ürün adını girin" {...register("name")} />
                         {errors.name && <p className="text-sm text-destructive">{errors.name.message}</p>}
                     </div>
 
+                    {/* ── Brand & Size ── */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div className="space-y-2">
                             <Label htmlFor="brand">Marka (Opsiyonel)</Label>
@@ -126,6 +322,7 @@ export function ProductForm({ initialData, categories, suppliers, onSuccess, hid
                         </div>
                     </div>
 
+                    {/* ── Barcode & Internal Code ── */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div className="space-y-2">
                             <Label htmlFor="barcode">Barkod</Label>
@@ -149,6 +346,7 @@ export function ProductForm({ initialData, categories, suppliers, onSuccess, hid
                         </div>
                     </div>
 
+                    {/* ── Category & Supplier ── */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div className="space-y-2">
                             <Label>Kategori</Label>
@@ -187,19 +385,39 @@ export function ProductForm({ initialData, categories, suppliers, onSuccess, hid
                         </div>
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                            <Label htmlFor="cost_price">Maliyet Fiyatı (₺)</Label>
-                            <Input id="cost_price" type="number" step="0.01" {...register("cost_price")} />
-                            {errors.cost_price && <p className="text-sm text-destructive">{errors.cost_price.message}</p>}
+                    {/* ── Prices with Profit Margin ── */}
+                    <div className="space-y-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                                <Label htmlFor="cost_price">Maliyet Fiyatı (₺)</Label>
+                                <Input id="cost_price" type="number" step="0.01" {...register("cost_price")} />
+                                {errors.cost_price && <p className="text-sm text-destructive">{errors.cost_price.message}</p>}
+                            </div>
+                            <div className="space-y-2">
+                                <Label htmlFor="sale_price">Satış Fiyatı (₺)</Label>
+                                <Input id="sale_price" type="number" step="0.01" {...register("sale_price")} />
+                                {errors.sale_price && <p className="text-sm text-destructive">{errors.sale_price.message}</p>}
+                            </div>
                         </div>
-                        <div className="space-y-2">
-                            <Label htmlFor="sale_price">Satış Fiyatı (₺)</Label>
-                            <Input id="sale_price" type="number" step="0.01" {...register("sale_price")} />
-                            {errors.sale_price && <p className="text-sm text-destructive">{errors.sale_price.message}</p>}
-                        </div>
+
+                        {/* Profit Margin Info */}
+                        {profitInfo && (
+                            <div
+                                className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium border ${profitInfo.isPositive
+                                        ? "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-400 dark:border-emerald-800"
+                                        : "bg-red-50 text-red-700 border-red-200 dark:bg-red-950/30 dark:text-red-400 dark:border-red-800"
+                                    }`}
+                            >
+                                <span>
+                                    {profitInfo.isPositive ? "📈" : "📉"}{" "}
+                                    Kâr: {profitInfo.profit.toLocaleString("tr-TR", { minimumFractionDigits: 2 })} ₺
+                                    {" "}({profitInfo.isPositive ? "+" : ""}{profitInfo.marginPercent}% marj)
+                                </span>
+                            </div>
+                        )}
                     </div>
 
+                    {/* ── Stock Quantities ── */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div className="space-y-2">
                             <Label htmlFor="stock_quantity">Stok Miktarı</Label>
@@ -213,6 +431,7 @@ export function ProductForm({ initialData, categories, suppliers, onSuccess, hid
                         </div>
                     </div>
 
+                    {/* ── Submit Buttons ── */}
                     <div className="flex justify-end gap-3 pt-4 border-t">
                         <Button
                             type="button"
@@ -225,8 +444,8 @@ export function ProductForm({ initialData, categories, suppliers, onSuccess, hid
                         <Button type="submit" disabled={isSubmitting}>
                             {isSubmitting ? (
                                 <span className="flex items-center gap-2">
-                                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                                    Kaydediliyor...
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                    {isUploadingImage ? "Resim yükleniyor..." : "Kaydediliyor..."}
                                 </span>
                             ) : (
                                 <span className="flex items-center gap-2">

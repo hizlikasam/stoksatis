@@ -94,12 +94,27 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
                                     {products.map((product) => (
                                         <TableRow key={product.id}>
                                             <TableCell className="font-medium">
-                                                {product.name}
-                                                {product.internal_code && (
-                                                    <span className="block text-xs text-muted-foreground">
-                                                        Kod: {product.internal_code}
-                                                    </span>
-                                                )}
+                                                <div className="flex items-center gap-3">
+                                                    <div className="flex-shrink-0 h-10 w-10 rounded-lg overflow-hidden bg-muted flex items-center justify-center border">
+                                                        {product.image_url ? (
+                                                            <img
+                                                                src={product.image_url}
+                                                                alt={product.name}
+                                                                className="h-full w-full object-cover"
+                                                            />
+                                                        ) : (
+                                                            <Package className="h-5 w-5 text-muted-foreground/40" />
+                                                        )}
+                                                    </div>
+                                                    <div>
+                                                        {product.name}
+                                                        {product.internal_code && (
+                                                            <span className="block text-xs text-muted-foreground">
+                                                                Kod: {product.internal_code}
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                </div>
                                             </TableCell>
                                             <TableCell>{product.barcode || "-"}</TableCell>
                                             <TableCell>

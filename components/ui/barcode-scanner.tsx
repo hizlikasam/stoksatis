@@ -1,10 +1,16 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
-import { Html5QrcodeScanner, Html5QrcodeScanType } from "html5-qrcode";
+import React, { useEffect, useRef, useCallback, useState } from "react";
+import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
 import { Button } from "@/components/ui/button";
-import { X, Camera } from "lucide-react";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { X } from "lucide-react";
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogHeader,
+    DialogTitle,
+} from "@/components/ui/dialog";
 
 interface BarcodeScannerProps {
     onResult: (result: string) => void;
@@ -12,74 +18,193 @@ interface BarcodeScannerProps {
     onClose: () => void;
 }
 
-export function BarcodeScannerDialog({ onResult, isOpen, onClose }: BarcodeScannerProps) {
-    const scannerRef = useRef<Html5QrcodeScanner | null>(null);
+// Supported 1D & 2D barcode formats for product scanning
+const SUPPORTED_FORMATS = [
+    Html5QrcodeSupportedFormats.EAN_13,
+    Html5QrcodeSupportedFormats.EAN_8,
+    Html5QrcodeSupportedFormats.UPC_A,
+    Html5QrcodeSupportedFormats.UPC_E,
+    Html5QrcodeSupportedFormats.CODE_128,
+    Html5QrcodeSupportedFormats.CODE_39,
+    Html5QrcodeSupportedFormats.CODE_93,
+    Html5QrcodeSupportedFormats.ITF,
+    Html5QrcodeSupportedFormats.QR_CODE,
+    Html5QrcodeSupportedFormats.DATA_MATRIX,
+];
+
+const READER_ID = "barcode-reader";
+
+export function BarcodeScannerDialog({
+    onResult,
+    isOpen,
+    onClose,
+}: BarcodeScannerProps) {
+    const html5QrcodeRef = useRef<Html5Qrcode | null>(null);
+    const isScanningRef = useRef(false);
+    const hasResultRef = useRef(false);
     const [error, setError] = useState("");
 
+    // Stable callbacks via refs to avoid re-triggering useEffect
+    const onResultRef = useRef(onResult);
+    const onCloseRef = useRef(onClose);
     useEffect(() => {
-        if (isOpen) {
-            // Need a slight delay to ensure DOM element is mounted inside the Dialog Content
-            const initScanner = setTimeout(() => {
-                scannerRef.current = new Html5QrcodeScanner(
-                    "reader",
-                    {
-                        fps: 15,
-                        // qrbox alanını kaldırıyoruz ki kameranın GÖRDÜĞÜ TÜM ALANI (tam çerçeve) tarasın.
-                        // Dar çerçeveye oturtma zorunluluğu ortadan kalkar.
-                        videoConstraints: {
-                            facingMode: "environment", // mobilde arka kamerayı zorlar
-                        },
-                        experimentalFeatures: {
-                            useBarCodeDetectorIfSupported: true // Tarayıcı destekliyorsa donanımsal hızlandırma kullanır
-                        },
-                        rememberLastUsedCamera: true,
-                    },
-                    false
-                );
+        onResultRef.current = onResult;
+    }, [onResult]);
+    useEffect(() => {
+        onCloseRef.current = onClose;
+    }, [onClose]);
 
-                scannerRef.current.render(
-                    (decodedText) => {
-                        // On success
-                        scannerRef.current?.clear().catch(console.error);
-                        onResult(decodedText);
-                        onClose();
-                    },
-                    (errorMessage) => {
-                        // Error callback is called very frequently, we don't need to log everything
-                        // just ignore unless it's a fatal error
-                    }
-                );
-            }, 100);
-
-            return () => {
-                clearTimeout(initScanner);
-                if (scannerRef.current) {
-                    scannerRef.current.clear().catch(console.error);
-                }
-            };
+    const stopScanner = useCallback(async () => {
+        if (html5QrcodeRef.current && isScanningRef.current) {
+            try {
+                await html5QrcodeRef.current.stop();
+            } catch {
+                // Ignore stop errors
+            }
+            isScanningRef.current = false;
         }
-    }, [isOpen, onResult, onClose]);
+        // Clear the html5-qrcode instance
+        if (html5QrcodeRef.current) {
+            try {
+                html5QrcodeRef.current.clear();
+            } catch {
+                // Ignore clear errors
+            }
+            html5QrcodeRef.current = null;
+        }
+    }, []);
+
+    useEffect(() => {
+        if (!isOpen) return;
+
+        hasResultRef.current = false;
+        setError("");
+
+        // Delay to ensure the Dialog DOM is mounted
+        const timerId = setTimeout(async () => {
+            const readerEl = document.getElementById(READER_ID);
+            if (!readerEl) return;
+
+            try {
+                const qrcode = new Html5Qrcode(READER_ID, {
+                    formatsToSupport: SUPPORTED_FORMATS,
+                    verbose: false,
+                });
+                html5QrcodeRef.current = qrcode;
+
+                await qrcode.start(
+                    { facingMode: "environment" },
+                    {
+                        fps: 10,
+                        qrbox: (viewfinderWidth, viewfinderHeight) => {
+                            // Use 80% of viewfinder for scanning area – good balance
+                            const size = Math.min(viewfinderWidth, viewfinderHeight);
+                            const edge = Math.floor(size * 0.8);
+                            return { width: Math.max(edge, 200), height: Math.max(Math.floor(edge * 0.45), 100) };
+                        },
+                        aspectRatio: 1.0,
+                        disableFlip: false,
+                    },
+                    (decodedText) => {
+                        // Prevent duplicate results
+                        if (hasResultRef.current) return;
+                        hasResultRef.current = true;
+
+                        onResultRef.current(decodedText);
+
+                        // Stop scanner then close dialog
+                        stopScanner().then(() => {
+                            onCloseRef.current();
+                        });
+                    },
+                    // Error callback – fires frequently, ignore scan-in-progress errors
+                    () => { }
+                );
+
+                isScanningRef.current = true;
+            } catch (err: unknown) {
+                const msg =
+                    err instanceof Error ? err.message : String(err);
+                if (
+                    msg.includes("NotAllowed") ||
+                    msg.includes("Permission")
+                ) {
+                    setError(
+                        "Kamera izni verilmedi. Lütfen tarayıcı ayarlarından kamera erişimine izin verin."
+                    );
+                } else if (
+                    msg.includes("NotFound") ||
+                    msg.includes("Requested device not found")
+                ) {
+                    setError(
+                        "Kamera bulunamadı. Lütfen kameranızın çalıştığından emin olun."
+                    );
+                } else {
+                    setError(`Kamera başlatılamadı: ${msg}`);
+                }
+            }
+        }, 300);
+
+        return () => {
+            clearTimeout(timerId);
+            stopScanner();
+        };
+        // Only depend on isOpen – callbacks are tracked via refs
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isOpen]);
 
     return (
-        <Dialog open={isOpen} onOpenChange={onClose}>
-            <DialogContent className="sm:max-w-md">
+        <Dialog
+            open={isOpen}
+            onOpenChange={(open) => {
+                if (!open) {
+                    stopScanner().then(() => onClose());
+                }
+            }}
+        >
+            <DialogContent className="sm:max-w-md p-4">
                 <DialogHeader>
                     <DialogTitle>Barkod Okutun</DialogTitle>
                     <DialogDescription>
-                        Ürününüzün barkodunu kameraya gösterin. Tarayıcı izin isterse "İzin Ver" (Allow) butonuna tıklayın.
+                        Ürününüzün barkodunu kameraya gösterin. Barkodu
+                        tarama alanının içine hizalayın.
                     </DialogDescription>
                 </DialogHeader>
 
-                <div className="flex flex-col items-center justify-center min-h-[300px]">
+                <div className="flex flex-col items-center justify-center min-h-[320px]">
                     {error ? (
-                        <p className="text-sm text-destructive">{error}</p>
+                        <div className="text-center space-y-3 px-2">
+                            <p className="text-sm text-destructive">
+                                {error}
+                            </p>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                    setError("");
+                                    // Re-trigger by toggling isOpen through close/open
+                                    onClose();
+                                }}
+                            >
+                                Tekrar Dene
+                            </Button>
+                        </div>
                     ) : (
-                        <div id="reader" className="w-full max-w-sm rounded overflow-hidden"></div>
+                        <div
+                            id={READER_ID}
+                            className="w-full rounded overflow-hidden"
+                            style={{ minHeight: 280 }}
+                        />
                     )}
                 </div>
 
-                <div className="flex justify-center mt-4">
-                    <Button variant="outline" onClick={onClose}>
+                <div className="flex justify-center mt-2">
+                    <Button
+                        variant="outline"
+                        onClick={() => {
+                            stopScanner().then(() => onClose());
+                        }}
+                    >
                         <X className="mr-2 h-4 w-4" /> İptal
                     </Button>
                 </div>
