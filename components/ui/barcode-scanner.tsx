@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useEffect, useRef, useCallback, useState } from "react";
-import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
+import React, { useEffect, useRef, useState, useCallback } from "react";
+import { BrowserMultiFormatReader, DecodeHintType, BarcodeFormat, Result } from "@zxing/library";
 import { Button } from "@/components/ui/button";
 import { X } from "lucide-react";
 import {
@@ -18,33 +18,17 @@ interface BarcodeScannerProps {
     onClose: () => void;
 }
 
-// Supported 1D & 2D barcode formats for product scanning
-const SUPPORTED_FORMATS = [
-    Html5QrcodeSupportedFormats.EAN_13,
-    Html5QrcodeSupportedFormats.EAN_8,
-    Html5QrcodeSupportedFormats.UPC_A,
-    Html5QrcodeSupportedFormats.UPC_E,
-    Html5QrcodeSupportedFormats.CODE_128,
-    Html5QrcodeSupportedFormats.CODE_39,
-    Html5QrcodeSupportedFormats.CODE_93,
-    Html5QrcodeSupportedFormats.ITF,
-    Html5QrcodeSupportedFormats.QR_CODE,
-    Html5QrcodeSupportedFormats.DATA_MATRIX,
-];
-
-const READER_ID = "barcode-reader";
-
 export function BarcodeScannerDialog({
     onResult,
     isOpen,
     onClose,
 }: BarcodeScannerProps) {
-    const html5QrcodeRef = useRef<Html5Qrcode | null>(null);
-    const isScanningRef = useRef(false);
+    const videoRef = useRef<HTMLVideoElement>(null);
+    const codeReaderRef = useRef<BrowserMultiFormatReader | null>(null);
     const hasResultRef = useRef(false);
-    const [error, setError] = useState("");
+    const [error, setError] = useState<string>("");
 
-    // Stable callbacks via refs to avoid re-triggering useEffect
+    // Callback stabilizasyonu
     const onResultRef = useRef(onResult);
     const onCloseRef = useRef(onClose);
     useEffect(() => {
@@ -54,23 +38,13 @@ export function BarcodeScannerDialog({
         onCloseRef.current = onClose;
     }, [onClose]);
 
-    const stopScanner = useCallback(async () => {
-        if (html5QrcodeRef.current && isScanningRef.current) {
+    const stopScanner = useCallback(() => {
+        if (codeReaderRef.current) {
             try {
-                await html5QrcodeRef.current.stop();
-            } catch {
-                // Ignore stop errors
+                codeReaderRef.current.reset();
+            } catch (err) {
+                // Hataları göz ardı et
             }
-            isScanningRef.current = false;
-        }
-        // Clear the html5-qrcode instance
-        if (html5QrcodeRef.current) {
-            try {
-                html5QrcodeRef.current.clear();
-            } catch {
-                // Ignore clear errors
-            }
-            html5QrcodeRef.current = null;
         }
     }, []);
 
@@ -80,84 +54,84 @@ export function BarcodeScannerDialog({
         hasResultRef.current = false;
         setError("");
 
-        // Delay to ensure the Dialog DOM is mounted
-        const timerId = setTimeout(async () => {
-            const readerEl = document.getElementById(READER_ID);
-            if (!readerEl) return;
+        // MultiFormatReader nesnesini desteklenen formatlarla başlatıyoruz.
+        const hints = new Map<DecodeHintType, any>();
+        hints.set(DecodeHintType.POSSIBLE_FORMATS, [
+            BarcodeFormat.EAN_13,
+            BarcodeFormat.EAN_8,
+            BarcodeFormat.UPC_A,
+            BarcodeFormat.UPC_E,
+            BarcodeFormat.CODE_128,
+            BarcodeFormat.CODE_39,
+            BarcodeFormat.CODE_93,
+            BarcodeFormat.QR_CODE,
+            BarcodeFormat.DATA_MATRIX,
+            BarcodeFormat.ITF,
+        ]);
 
-            try {
-                const qrcode = new Html5Qrcode(READER_ID, {
-                    formatsToSupport: SUPPORTED_FORMATS,
-                    verbose: false,
-                });
-                html5QrcodeRef.current = qrcode;
+        const codeReader = new BrowserMultiFormatReader(hints);
+        codeReaderRef.current = codeReader;
 
-                await qrcode.start(
-                    { facingMode: "environment" },
-                    {
-                        fps: 20,
-                        qrbox: (viewfinderWidth, viewfinderHeight) => {
-                            // Ekranın daha geniş bir alanını tarama için kullan
-                            const width = Math.floor(viewfinderWidth * 0.9);
-                            const height = Math.floor(viewfinderHeight * 0.6);
-                            return { width, height };
+        // Video elementinin DOM'a mount olması için ufak bir bekleme
+        const timeoutId = setTimeout(() => {
+            if (videoRef.current) {
+                codeReader
+                    .decodeFromConstraints(
+                        {
+                            video: {
+                                facingMode: "environment", // Arka kamerayı zorlar
+                                // Odaklanma sorunu yaşamaması için gelişmiş kısıtlamalar eklenebilir, fakat environment çoğu mobil cihazda iş görür.
+                            },
                         },
-                        disableFlip: false,
-                    },
-                    (decodedText) => {
-                        // Prevent duplicate results
-                        if (hasResultRef.current) return;
-                        hasResultRef.current = true;
+                        videoRef.current,
+                        (result: Result | null, err: Error | undefined) => {
+                            if (result) {
+                                // Çift okumayı önleme
+                                if (hasResultRef.current) return;
+                                hasResultRef.current = true;
 
-                        onResultRef.current(decodedText);
+                                onResultRef.current(result.getText());
 
-                        // Stop scanner then close dialog
-                        stopScanner().then(() => {
-                            onCloseRef.current();
-                        });
-                    },
-                    // Error callback – fires frequently, ignore scan-in-progress errors
-                    () => { }
-                );
-
-                isScanningRef.current = true;
-            } catch (err: unknown) {
-                const msg =
-                    err instanceof Error ? err.message : String(err);
-                if (
-                    msg.includes("NotAllowed") ||
-                    msg.includes("Permission")
-                ) {
-                    setError(
-                        "Kamera izni verilmedi. Lütfen tarayıcı ayarlarından kamera erişimine izin verin."
-                    );
-                } else if (
-                    msg.includes("NotFound") ||
-                    msg.includes("Requested device not found")
-                ) {
-                    setError(
-                        "Kamera bulunamadı. Lütfen kameranızın çalıştığından emin olun."
-                    );
-                } else {
-                    setError(`Kamera başlatılamadı: ${msg}`);
-                }
+                                // Tarayıcıyı durdur ve dialogu kapat
+                                stopScanner();
+                                onCloseRef.current();
+                            }
+                            if (err) {
+                                // Bulunamama hataları (NotFoundException) çok sıktır (her saniye karede fırlatır), yok say.
+                                if (err.name === "NotFoundException") {
+                                    return;
+                                }
+                                // Ciddi bir hata varsa loglayabiliriz, genelde Zxing sessiz başarısızlıklarla çalışır.
+                            }
+                        }
+                    )
+                    .catch((err: any) => {
+                        console.error("Camera Start Error: ", err);
+                        const msg = String(err);
+                        if (msg.includes("NotAllowed") || msg.includes("Permission denied")) {
+                            setError("Kamera izni verilmedi. Lütfen tarayıcı ayarlarından kamera erişimine izin verin.");
+                        } else if (msg.includes("NotFound") || msg.includes("Requested device not found")) {
+                            setError("Kamera desteklenmiyor veya bulunamadı.");
+                        } else {
+                            setError(`Kamera başlatılamadı: ${err.message || msg}`);
+                        }
+                    });
             }
-        }, 300);
+        }, 100);
 
         return () => {
-            clearTimeout(timerId);
+            clearTimeout(timeoutId);
             stopScanner();
         };
-        // Only depend on isOpen – callbacks are tracked via refs
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [isOpen]);
+    }, [isOpen, stopScanner]);
 
     return (
         <Dialog
             open={isOpen}
             onOpenChange={(open) => {
                 if (!open) {
-                    stopScanner().then(() => onClose());
+                    stopScanner();
+                    onClose();
                 }
             }}
         >
@@ -165,35 +139,39 @@ export function BarcodeScannerDialog({
                 <DialogHeader>
                     <DialogTitle>Barkod Okutun</DialogTitle>
                     <DialogDescription>
-                        Ürününüzün barkodunu kameraya gösterin. Barkodu
-                        tarama alanının içine hizalayın.
+                        Ürününüzün barkodunu kameraya gösterin. Zxing motoru ile hızlı tarama aktif.
                     </DialogDescription>
                 </DialogHeader>
 
-                <div className="flex flex-col items-center justify-center min-h-[320px]">
+                <div className="flex flex-col items-center justify-center min-h-[300px] w-full bg-black/5 rounded-md relative overflow-hidden">
                     {error ? (
-                        <div className="text-center space-y-3 px-2">
-                            <p className="text-sm text-destructive">
-                                {error}
-                            </p>
+                        <div className="text-center space-y-3 px-4">
+                            <p className="text-sm text-destructive">{error}</p>
                             <Button
                                 variant="outline"
                                 size="sm"
                                 onClick={() => {
                                     setError("");
-                                    // Re-trigger by toggling isOpen through close/open
                                     onClose();
                                 }}
                             >
-                                Tekrar Dene
+                                Kapat
                             </Button>
                         </div>
                     ) : (
-                        <div
-                            id={READER_ID}
-                            className="w-full rounded overflow-hidden"
-                            style={{ minHeight: 280 }}
-                        />
+                        <div className="relative w-full h-[300px] rounded overflow-hidden">
+                            <video
+                                ref={videoRef}
+                                className="w-full h-full object-cover"
+                                autoPlay
+                                muted
+                                playsInline
+                            />
+                            {/* Hedef gösterge kutusu (Görsel efekt amaçlı) */}
+                            <div className="absolute inset-0 border-[40px] border-black/40 z-10 pointer-events-none flex items-center justify-center">
+                                <div className="w-full h-[120px] border-2 border-red-500/70 rounded-md"></div>
+                            </div>
+                        </div>
                     )}
                 </div>
 
@@ -201,7 +179,8 @@ export function BarcodeScannerDialog({
                     <Button
                         variant="outline"
                         onClick={() => {
-                            stopScanner().then(() => onClose());
+                            stopScanner();
+                            onClose();
                         }}
                     >
                         <X className="mr-2 h-4 w-4" /> İptal
