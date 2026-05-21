@@ -75,9 +75,9 @@ export default function PosClient({ businessId }: { businessId: string }) {
                 {
                     product_id: product.id,
                     quantity: 1,
-                    unit_price: product.sale_price,
+                    unit_price: product.outlet_price,
                     cost_price: product.cost_price,
-                    total_price: product.sale_price,
+                    total_price: product.outlet_price,
                     product,
                 },
             ];
@@ -245,7 +245,10 @@ export default function PosClient({ businessId }: { businessId: string }) {
                                                                     {p.barcode || p.internal_code || "Kodu yok"} {p.size && `- ${p.size}`}
                                                                 </span>
                                                             </div>
-                                                            <span className="font-semibold text-sm tabular-nums text-primary">₺{p.sale_price.toFixed(2)}</span>
+                                                            <div className="flex flex-col items-end">
+                                                                <span className="text-xs text-muted-foreground line-through">₺{p.sale_price.toFixed(2)}</span>
+                                                                <span className="font-semibold text-sm tabular-nums text-emerald-600">₺{p.outlet_price.toFixed(2)}</span>
+                                                            </div>
                                                         </li>
                                                     ))}
                                                 </ul>

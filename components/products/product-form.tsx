@@ -65,6 +65,7 @@ export function ProductForm({ initialData, categories, suppliers, onSuccess, hid
             supplier_id: initialData?.supplier_id || "",
             cost_price: initialData?.cost_price || 0,
             sale_price: initialData?.sale_price || 0,
+            outlet_price: initialData?.outlet_price || 0,
             stock_quantity: initialData?.stock_quantity || 0,
             min_stock_quantity: initialData?.min_stock_quantity || 0,
             image_url: initialData?.image_url || "",
@@ -74,12 +75,13 @@ export function ProductForm({ initialData, categories, suppliers, onSuccess, hid
     const categoryId = watch("category_id");
     const supplierId = watch("supplier_id");
     const costPrice = watch("cost_price");
-    const salePrice = watch("sale_price");
+    const salePrice = watch("sale_price"); // List price
+    const outletPrice = watch("outlet_price"); // Actual selling price
 
-    // Profit margin calculation
+    // Profit margin calculation based on actual selling price (outlet_price)
     const profitInfo = useMemo(() => {
         const cost = Number(costPrice) || 0;
-        const sale = Number(salePrice) || 0;
+        const sale = Number(outletPrice) || 0;
         if (cost <= 0 || sale <= 0) return null;
 
         const profit = sale - cost;
@@ -90,7 +92,7 @@ export function ProductForm({ initialData, categories, suppliers, onSuccess, hid
             marginPercent,
             isPositive: profit > 0,
         };
-    }, [costPrice, salePrice]);
+    }, [costPrice, outletPrice]);
 
     // Handle image file selection (camera or gallery)
     function handleImageSelect(event: React.ChangeEvent<HTMLInputElement>) {
@@ -387,16 +389,21 @@ export function ProductForm({ initialData, categories, suppliers, onSuccess, hid
 
                     {/* ── Prices with Profit Margin ── */}
                     <div className="space-y-3">
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                             <div className="space-y-2">
                                 <Label htmlFor="cost_price">Maliyet Fiyatı (₺)</Label>
                                 <Input id="cost_price" type="number" step="0.01" {...register("cost_price")} />
                                 {errors.cost_price && <p className="text-sm text-destructive">{errors.cost_price.message}</p>}
                             </div>
                             <div className="space-y-2">
-                                <Label htmlFor="sale_price">Satış Fiyatı (₺)</Label>
+                                <Label htmlFor="sale_price">Liste Satış Fiyatı (₺)</Label>
                                 <Input id="sale_price" type="number" step="0.01" {...register("sale_price")} />
                                 {errors.sale_price && <p className="text-sm text-destructive">{errors.sale_price.message}</p>}
+                            </div>
+                            <div className="space-y-2">
+                                <Label htmlFor="outlet_price">Geçerli Fiyat / Outlet (₺)</Label>
+                                <Input id="outlet_price" type="number" step="0.01" {...register("outlet_price")} />
+                                {errors.outlet_price && <p className="text-sm text-destructive">{errors.outlet_price.message}</p>}
                             </div>
                         </div>
 
@@ -404,8 +411,8 @@ export function ProductForm({ initialData, categories, suppliers, onSuccess, hid
                         {profitInfo && (
                             <div
                                 className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium border ${profitInfo.isPositive
-                                        ? "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-400 dark:border-emerald-800"
-                                        : "bg-red-50 text-red-700 border-red-200 dark:bg-red-950/30 dark:text-red-400 dark:border-red-800"
+                                    ? "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-400 dark:border-emerald-800"
+                                    : "bg-red-50 text-red-700 border-red-200 dark:bg-red-950/30 dark:text-red-400 dark:border-red-800"
                                     }`}
                             >
                                 <span>

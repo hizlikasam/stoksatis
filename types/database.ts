@@ -87,6 +87,7 @@ export interface Product {
     supplier_id: string | null;
     cost_price: number;
     sale_price: number;
+    outlet_price: number;
     stock_quantity: number;
     min_stock_quantity: number;
     image_url: string | null;
@@ -157,6 +158,7 @@ export interface ProductFormValues {
     supplier_id?: string | null;
     cost_price: number;
     sale_price: number;
+    outlet_price: number;
     stock_quantity: number;
     min_stock_quantity: number;
     image_url?: string;

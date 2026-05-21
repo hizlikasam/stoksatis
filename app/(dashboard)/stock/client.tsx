@@ -36,13 +36,15 @@ import {
     Search,
     Package,
     ScanBarcode,
-    Camera
+    Camera,
+    FileSpreadsheet
 } from "lucide-react";
 import { getStockMovements, addStockMovement } from "@/lib/services/stock";
 import { getProducts, createProduct, getCategories, getSuppliers } from "@/lib/services/products";
 import { Product, Category, Supplier } from "@/types/database";
 import { BarcodeScannerDialog } from "@/components/ui/barcode-scanner";
 import { ProductForm } from "@/components/products/product-form";
+import { BulkExcelImportDialog } from "@/components/stock/bulk-excel-import-dialog";
 
 export default function StockClient({ businessId }: { businessId: string }) {
     const [movements, setMovements] = useState<any[]>([]);
@@ -54,6 +56,7 @@ export default function StockClient({ businessId }: { businessId: string }) {
 
     // Modal state
     const [modalOpen, setModalOpen] = useState(false);
+    const [isBulkExcelOpen, setIsBulkExcelOpen] = useState(false);
     const [moveType, setMoveType] = useState<"stock_in" | "stock_out">("stock_in");
 
     // Form state
@@ -181,7 +184,11 @@ export default function StockClient({ businessId }: { businessId: string }) {
                             Ürün giriş, çıkış ve sayım işlemlerini takip edin
                         </p>
                     </div>
-                    <div className="flex gap-2">
+                    <div className="flex flex-wrap gap-2">
+                        <Button variant="outline" onClick={() => setIsBulkExcelOpen(true)} className="border-blue-200 hover:bg-blue-50 hover:text-blue-700">
+                            <FileSpreadsheet className="h-4 w-4 mr-2 text-blue-600" />
+                            Excel İle Yükle
+                        </Button>
                         <Button variant="outline" onClick={() => handleOpenModal("stock_in")} className="border-green-200 hover:bg-green-50 hover:text-green-700">
                             <ArrowDownToLine className="h-4 w-4 mr-2 text-green-600" />
                             Stok Girişi
@@ -450,6 +457,15 @@ export default function StockClient({ businessId }: { businessId: string }) {
                     } else {
                         toast.error("Okunan barkoda sahip ürün bulunamadı!");
                     }
+                }}
+            />
+
+            <BulkExcelImportDialog
+                isOpen={isBulkExcelOpen}
+                onClose={() => setIsBulkExcelOpen(false)}
+                onSuccess={() => {
+                    loadData();
+                    setIsBulkExcelOpen(false);
                 }}
             />
         </>

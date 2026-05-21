@@ -84,7 +84,8 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
                                         <TableHead>Barkod</TableHead>
                                         <TableHead>Kategori</TableHead>
                                         <TableHead className="text-right">Maliyet (₺)</TableHead>
-                                        <TableHead className="text-right">Satış (₺)</TableHead>
+                                        <TableHead className="text-right">Liste Fiyatı (₺)</TableHead>
+                                        <TableHead className="text-right text-primary">Outlet Fiyatı (₺)</TableHead>
                                         <TableHead className="text-center">Stok</TableHead>
                                         <TableHead className="text-center">Durum</TableHead>
                                         <TableHead className="text-right">İşlem</TableHead>
@@ -129,8 +130,11 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
                                             <TableCell className="text-right">
                                                 {Number(product.cost_price).toLocaleString("tr-TR", { minimumFractionDigits: 2 })}
                                             </TableCell>
-                                            <TableCell className="text-right font-medium text-emerald-600">
+                                            <TableCell className="text-right text-muted-foreground line-through text-xs">
                                                 {Number(product.sale_price).toLocaleString("tr-TR", { minimumFractionDigits: 2 })}
+                                            </TableCell>
+                                            <TableCell className="text-right font-bold text-emerald-600">
+                                                {Number(product.outlet_price).toLocaleString("tr-TR", { minimumFractionDigits: 2 })}
                                             </TableCell>
                                             <TableCell className="text-center">
                                                 <Badge
