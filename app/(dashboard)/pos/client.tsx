@@ -37,6 +37,7 @@ export default function PosClient({ businessId }: { businessId: string }) {
     const [isScannerOpen, setIsScannerOpen] = useState(false);
     const [discountType, setDiscountType] = useState<"amount" | "final_price">("amount");
     const [discountInputValue, setDiscountInputValue] = useState<string>("");
+    const CARD_SURCHARGE_MULTIPLIER = 1.2; // Kart ile ödeme: outlet_price x 1.2
 
     useEffect(() => {
         // Load products for quick search / barcode matching
@@ -142,6 +143,7 @@ export default function PosClient({ businessId }: { businessId: string }) {
         : [];
 
     const subtotal = cart.reduce((sum, item) => sum + item.total_price, 0);
+    const subtotalCard = parseFloat((subtotal * CARD_SURCHARGE_MULTIPLIER).toFixed(2));
 
     // İndirim Hesaplaması
     const parsedDiscountInput = parseFloat(discountInputValue) || 0;
@@ -156,31 +158,44 @@ export default function PosClient({ businessId }: { businessId: string }) {
     if (discountToApply < 0) discountToApply = 0;
     if (discountToApply > subtotal && discountType === "amount") discountToApply = subtotal;
 
-    const finalAmount = subtotal - discountToApply;
+    const finalAmountCash = subtotal - discountToApply;
+    // Card surcharge applied on the post-discount amount
+    const discountToApplyCard = parseFloat((discountToApply * CARD_SURCHARGE_MULTIPLIER).toFixed(2));
+    const finalAmountCard = parseFloat((subtotalCard - discountToApplyCard).toFixed(2));
 
     const handleCheckout = async (paymentMethod: "cash" | "credit_card") => {
         if (cart.length === 0) return;
         setSubmitting(true);
         try {
-            // Remove 'product' object to match SaleItemData interface
+            const isCard = paymentMethod === "credit_card";
+            const multiplier = isCard ? CARD_SURCHARGE_MULTIPLIER : 1;
+
+            // Apply surcharge to item prices when paying by card
             const itemsToSave = cart.map(({ product_id, quantity, unit_price, cost_price, total_price }) => ({
-                product_id, quantity, unit_price, cost_price, total_price
+                product_id,
+                quantity,
+                unit_price: parseFloat((unit_price * multiplier).toFixed(2)),
+                cost_price,
+                total_price: parseFloat((total_price * multiplier).toFixed(2)),
             }));
+
+            const effectiveSubtotal = isCard ? subtotalCard : subtotal;
+            const effectiveDiscount = isCard ? discountToApplyCard : discountToApply;
+            const effectiveFinal = isCard ? finalAmountCard : finalAmountCash;
 
             await createSale(
                 businessId,
-                subtotal,
-                discountToApply, // applied discount
-                finalAmount,
+                effectiveSubtotal,
+                effectiveDiscount,
+                effectiveFinal,
                 paymentMethod,
-                "", // note
+                isCard ? "Kart komisyonu (%20) uygulandı" : "",
                 itemsToSave
             );
 
-            toast.success("Satış başarıyla tamamlandı!");
+            toast.success(`Satış başarıyla tamamlandı! (${isCard ? "Kart" : "Nakit"})`);
             setCart([]);
-            setDiscountInputValue(""); // İndirimi sıfırla
-            // Reload products to update stock quantities
+            setDiscountInputValue("");
             const newProds = await getProducts();
             setProducts(newProds);
         } catch (error: any) {
@@ -402,9 +417,16 @@ export default function PosClient({ businessId }: { businessId: string }) {
 
                                 <Separator className="bg-muted-foreground/20" />
 
-                                <div className="flex justify-between items-center py-2">
-                                    <span className="text-lg font-bold">Toplam</span>
-                                    <span className="text-3xl font-black text-primary tabular-nums tracking-tight">₺{finalAmount.toFixed(2)}</span>
+                                {/* Nakit ve Kart fiyatları yan yana */}
+                                <div className="grid grid-cols-2 gap-3 py-2">
+                                    <div className="flex flex-col items-center p-3 rounded-lg bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800">
+                                        <span className="text-xs text-emerald-600 font-semibold mb-1">💵 Nakit</span>
+                                        <span className="text-xl font-black text-emerald-700 dark:text-emerald-400 tabular-nums">₺{finalAmountCash.toFixed(2)}</span>
+                                    </div>
+                                    <div className="flex flex-col items-center p-3 rounded-lg bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800">
+                                        <span className="text-xs text-blue-600 font-semibold mb-1">💳 Kart (+%20)</span>
+                                        <span className="text-xl font-black text-blue-700 dark:text-blue-400 tabular-nums">₺{finalAmountCard.toFixed(2)}</span>
+                                    </div>
                                 </div>
 
                                 <Separator className="bg-muted-foreground/20" />
